@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'self'; style-src 'self'; img-src 'self' data:; script-src 'self'"
+    />
+    <title>Talos</title>
+    <link rel="stylesheet" href="./renderer.css" />
+  </head>
+  <body>
+    <canvas id="stage" aria-label="Talos"></canvas>
+    <section id="sheet" hidden>
+      <div id="log" aria-live="polite"></div>
+      <form id="composer">
+        <textarea
+          id="input"
+          rows="1"
+          spellcheck="false"
+          placeholder="Ask Talos…"
+          aria-label="Message Talos"
+        ></textarea>
+        <button id="send" type="submit">Send</button>
+      </form>
+    </section>
+    <script src="./renderer.js"></script>
+  </body>
+</html>

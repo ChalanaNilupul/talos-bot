@@ -1,0 +1,27 @@
+{
+  "name": "talos",
+  "productName": "Talos",
+  "version": "0.0.1",
+  "private": true,
+  "description": "Talos — an animated desktop companion with coding-agent access. A VIXO product.",
+  "author": "VIXO",
+  "main": "dist/main.js",
+  "scripts": {
+    "build": "node scripts/build.mjs",
+    "dev": "node scripts/dev.mjs",
+    "start": "electron dist/main.js",
+    "typecheck": "tsc --noEmit",
+    "package": "node scripts/build.mjs && electron-builder"
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.10",
+    "@types/three": "^0.187.0",
+    "electron": "^45.5.0",
+    "electron-builder": "^26.18.0",
+    "esbuild": "^0.28.2",
+    "typescript": "^7.0.2"
+  },
+  "dependencies": {
+    "three": "^0.187.0"
+  }
+}

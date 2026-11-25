@@ -1,0 +1,26 @@
+appId: com.vixo.talos
+productName: Talos
+copyright: VIXO
+
+directories:
+  output: out
+  buildResources: build
+
+files:
+  - dist/**
+  - build/tray-16.png
+  - build/tray-32.png
+  - package.json
+  # esbuild already bundles three.js into dist/renderer/renderer.js, and main +
+  # preload import nothing but electron and node: builtins.
+  - '!node_modules/**'
+
+win:
+  target:
+    - nsis
+
+nsis:
+  oneClick: false
+  perMachine: false
+  allowToChangeInstallationDirectory: true
+  artifactName: Talos-Setup-${version}.exe
