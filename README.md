@@ -37,9 +37,10 @@ squircle shell, one dark visor, two pill eyes, and two detached hands that drift
   `Shift+Enter` is a newline, `Esc` puts the panel away. The same panel opens from anywhere with
   `Alt+Shift+Space`.
 - While it replies, the transcript **streams in token by token** and the pet goes through
-  `thinking` → `talking` → `happy`. The panel keeps the conversation until you quit.
+  `thinking` → `talking` → `happy`. The thread is written to disk after every turn, so restarting
+  Talos keeps the conversation — the tray menu has **Clear conversation** when you want it gone.
 - Leave it alone for 4 minutes and it **yawns**, then falls **asleep** at 5 minutes with little `z`s. Move the mouse to wake it.
-- A **tray icon** has: show chat, dock position, autostart toggle, forced click-through, settings folder, quit.
+- A **tray icon** has: show chat, clear conversation, dock position, autostart toggle, forced click-through, settings folder, quit.
 
 ## Changing the character
 
@@ -71,12 +72,13 @@ end up on either monitor, and no browser tool can see a transparent always-on-to
 
 ## How the chat panel works
 
-Three files, one direction of dependency:
+Four files, one direction of dependency:
 
 | File | Owns |
 |---|---|
 | [src/main/agent.ts](src/main/agent.ts) | the `AgentAdapter` seam. Today it holds `LocalEcho`, which repeats your message back and counts the turns. It touches no files, no shell, no network. |
 | [src/main/main.ts](src/main/main.ts) | the panel's *size and focus*: `openSheet` grows the window and makes it focusable, `closeSheet` shrinks it and hands focus back. Also owns the history — the renderer is a view. |
+| [src/main/history.ts](src/main/history.ts) | that history on disk: `chat-history.json` in the app-data folder, rewritten after every turn, read back at startup, dropped by the tray's Clear conversation. |
 | [src/renderer/chat.ts](src/renderer/chat.ts) | the panel's *contents*: history, the streaming bubble, the composer. Every byte of chat text goes in through `textContent`, never `innerHTML`. |
 
 The window is bigger than the pet while the panel is open, so nothing may assume "window rect ==
@@ -84,9 +86,12 @@ pet rect". `petPosition()` / `setPetPosition()` in main.ts are the only place th
 worked out; the canvas is pinned to the window's bottom-right in CSS.
 
 Verified against a running build: click-to-open, typing, streaming, the disabled Send button,
-`Esc`, `Alt+Shift+Space` from another app, and history surviving a close/reopen.
-Still not exercised: dismissal by clicking elsewhere (`blur`), the IME guard on `Enter`, and the
-`error` bubble — `LocalEcho` has no failure path yet, so nothing can raise one.
+`Esc`, `Alt+Shift+Space` from another app, history surviving a close/reopen, and history surviving
+a killed process — the reply after the restart correctly said it had 2 earlier turns, so the loaded
+thread is really being handed to the adapter and not just redisplayed.
+Still not exercised: dismissal by clicking elsewhere (`blur`), the IME guard on `Enter`, the
+Clear conversation tray click, and the `error` bubble — `LocalEcho` has no failure path yet, so
+nothing can raise one.
 
 ## Known limits
 
@@ -101,7 +106,7 @@ Still not exercised: dismissal by clicking elsewhere (`blur`), the IME guard on 
 ## Layout
 
 ```
-src/main/       overlay window, cursor loop, behaviour state machine, chat sheet, agent seam, tray, settings
+src/main/       overlay window, cursor loop, behaviour state machine, chat sheet, agent seam, tray, settings, history
 src/preload/    the only surface the renderer can reach (contextIsolation + sandbox on)
 src/renderer/   scene.ts = the character, renderer.ts = the behaviour that poses it, chat.ts = the panel
 src/shared/     types, sizes and IPC channel names

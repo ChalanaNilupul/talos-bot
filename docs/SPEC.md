@@ -202,8 +202,8 @@ What actually landed, and where it differs from the draft:
 - The panel grows out of the pet's corner; the window resizes around it while the pet stays put.
 - Replies come from `LocalEcho` behind the `AgentAdapter` seam, so nothing in P1 can read a file or run a command. `PERSONA` in [src/main/agent.ts](../src/main/agent.ts) is the prompt that P2 will hand to a real model.
 - Hotkey is `Alt+Shift+Space`, not `alt+space` (Windows owns that one).
-- History lives in the main process and survives close/reopen; it is capped at 40 messages and is **not** written to disk yet — restarting the app loses the thread. Persisting it belongs with P3's memory store.
-- Not yet verified by hand: dismissal on losing focus, the IME guard on `Enter`, and the error bubble (no adapter failure path exists to trigger it).
+- History lives in the main process, capped at 40 messages, and is written to `chat-history.json` in the app-data folder after every turn — a restart keeps the thread and the adapter is given it as context. The tray's Clear conversation drops it. Recall across *old* conversations, summarising it, and searching it are still P3's memory store.
+- Not yet verified by hand: dismissal on losing focus, the IME guard on `Enter`, the tray's Clear conversation (the menu is only reachable by a real click on the tray icon), and the error bubble (no adapter failure path exists to trigger it).
 
 ### P2 — It has hands
 `AgentAdapter` + first CLI adapter, allowlist UI, `ApprovalGate` with the inline approval card, audit log, git badge.
@@ -226,7 +226,8 @@ talos/
 ├─ package.json
 ├─ tsconfig.json
 ├─ src/
-│  ├─ main/        main.ts (overlay + state machine + chat sheet + tray), agent.ts (AgentAdapter seam), settings.ts
+│  ├─ main/        main.ts (overlay + state machine + chat sheet + tray), agent.ts (AgentAdapter seam),
+│  │               history.ts (transcript on disk), settings.ts
 │  │               └─ P2 adds: ApprovalGate, AuditLog, Watchers  ·  P3 adds: MemoryStore, SecureStore
 │  ├─ preload/     typed IPC bridge (the ONLY renderer surface), one fixed channel per method
 │  ├─ renderer/    scene.ts (character), renderer.ts (behaviour + input), chat.ts (ChatSheet), styles.css

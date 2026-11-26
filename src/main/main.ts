@@ -13,6 +13,7 @@ import {
   type PetState,
 } from '../shared/types';
 import { PERSONA, agent } from './agent';
+import { clearHistoryFile, loadHistory, saveHistory } from './history';
 import { persist, settings } from './settings';
 
 const CURSOR_POLL_MS = 33; // ~30Hz
@@ -47,6 +48,7 @@ let yawed = false;
 let sheetOpen = false;
 let overSheet = false;
 let replyInFlight = false;
+/** Loaded from disk in whenReady — see src/main/history.ts. */
 let history: ChatMessage[] = [];
 
 app.setAppUserModelId('com.vixo.talos');
@@ -205,6 +207,18 @@ function emitChat(event: ChatEvent): void {
   win?.webContents.send(CH.chatEvent, event);
 }
 
+/** Every history mutation goes through here, so nothing can change without being saved. */
+function pushHistory(message: ChatMessage): void {
+  history = [...history, message].slice(-HISTORY_LIMIT);
+  saveHistory(history);
+}
+
+function clearConversation(): void {
+  history = [];
+  clearHistoryFile();
+  win?.webContents.send(CH.chatHistory, history);
+}
+
 function openSheet(): void {
   if (!win || sheetOpen) return;
   sheetOpen = true;
@@ -243,7 +257,7 @@ async function handleSend(raw: string): Promise<void> {
   if (!prompt) return;
 
   const prior = history;
-  history = [...prior, { role: 'user' as const, text: prompt }].slice(-HISTORY_LIMIT);
+  pushHistory({ role: 'user', text: prompt });
   replyInFlight = true;
   wake();
   emitChat({ kind: 'user', text: prompt });
@@ -254,7 +268,7 @@ async function handleSend(raw: string): Promise<void> {
       if (state !== 'talking') setState('talking');
       emitChat({ kind: 'delta', text: delta });
     });
-    history = [...history, { role: 'talos' as const, text: reply }].slice(-HISTORY_LIMIT);
+    pushHistory({ role: 'talos', text: reply });
     emitChat({ kind: 'reply', text: reply });
     setState('happy');
   } catch (cause) {
@@ -329,6 +343,7 @@ function rebuildTray(): void {
       { label: 'Talos is resting on your desktop', enabled: false },
       { label: `Show chat  (${SUMMON_SHORTCUT})`, click: toggleSheet },
       { label: 'Replies are a local echo — the real agent arrives in P2', enabled: false },
+      { label: 'Clear conversation', click: clearConversation },
       { type: 'separator' },
       {
         label: 'Pass clicks through pet',
@@ -431,6 +446,7 @@ function createWindow(): BrowserWindow {
 }
 
 void app.whenReady().then(() => {
+  history = loadHistory();
   win = createWindow();
   if (!app.isPackaged) forwardRendererLogs(win);
   clampIntoDisplay();
