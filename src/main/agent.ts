@@ -27,15 +27,15 @@ export const PERSONA =
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
-const TOOL_COMMAND = /^\/tool\s+(read|write|run)\s+(.*)$/is;
+export const TOOL_COMMAND = /^\/tool\s+(read|write|run)\s+(.*)$/is;
 
 /**
- * P2 still ships the seam, not the brain. LocalEcho cannot decide anything on its
+ * The fallback when no real agent is installed. LocalEcho cannot decide anything on its
  * own, but `/tool read|write|run` hands a real request to the gate, so the approval
- * card, the allowlist and the audit log can all be exercised before a model exists
- * to be trusted with them.
+ * card, the allowlist and the audit log stay exercisable without a model — and the app
+ * still answers if Gemini goes missing.
  */
-class LocalEcho implements AgentAdapter {
+export class LocalEcho implements AgentAdapter {
   readonly id = 'local-echo';
 
   async send(request: AgentRequest, ctx: AgentContext): Promise<string> {
@@ -84,5 +84,3 @@ class LocalEcho implements AgentAdapter {
     return reply;
   }
 }
-
-export const agent: AgentAdapter = new LocalEcho();

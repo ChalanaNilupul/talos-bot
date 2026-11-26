@@ -1,10 +1,9 @@
 # Talos
 
 An animated companion that lives in the corner of your desktop and helps with coding.
-A VIXO product. **P2 stage 1** — the pet is alive, it chats, and the safety layer that will let it
-touch your files is built and verified. The *brain* is still a local echo: it only reads, writes or
-runs what you type after `/tool`, so there is nothing yet that could decide to do something on its
-own. Wiring a real agent is the next stage.
+A VIXO product. **P2 stage 2** — the pet is alive, it chats, the safety layer that lets it touch your
+files is built and verified, and a real model now drives it: Gemini CLI runs as a child process and
+every file it wants is a card you answer. Shell is denied outright at this stage.
 
 Read [docs/SPEC.md](docs/SPEC.md) for the full plan and the reason each decision was made.
 
@@ -29,6 +28,9 @@ npm run build      # one-off build into dist/
 npm start          # run the built app without watching
 npm run typecheck  # TypeScript only, no output
 ```
+
+Talos answers with the chat panel either way. To get *Gemini* behind it rather than the local echo,
+see *How the agent reaches Gemini* below.
 
 ## What you should see
 
@@ -88,7 +90,7 @@ Four files, one direction of dependency:
 
 | File | Owns |
 |---|---|
-| [src/main/agent.ts](src/main/agent.ts) | the `AgentAdapter` seam. Today it holds `LocalEcho`, which repeats your message back and counts the turns. It touches no files, no shell, no network. |
+| [src/main/agent.ts](src/main/agent.ts) | the `AgentAdapter` seam, the `PERSONA` prompt, and `LocalEcho` — the fallback that repeats your message back and counts the turns. It touches no files, no shell, no network. |
 | [src/main/main.ts](src/main/main.ts) | the panel's *size and focus*: `openSheet` grows the window and makes it focusable, `closeSheet` shrinks it and hands focus back. Also owns the history — the renderer is a view. |
 | [src/main/history.ts](src/main/history.ts) | that history on disk: `chat-history.json` in the app-data folder, rewritten after every turn, read back at startup, dropped by the tray's Clear conversation. |
 | [src/renderer/chat.ts](src/renderer/chat.ts) | the panel's *contents*: history, the streaming bubble, the composer. Every byte of chat text goes in through `textContent`, never `innerHTML`. |
@@ -138,10 +140,83 @@ and `cancelAll` on quit. All three funnel into the same `settle()` path that the
 outcomes above already use. The audit-line shape for auto-allowed actions was tightened after the
 live run, so that one is code-verified only.
 
+## How the agent reaches Gemini (P2, stage 2)
+
+Talos speaks [ACP](https://agentclientprotocol.com) — the Agent Client Protocol — to `gemini --acp`, a
+child process, over newline-delimited JSON-RPC on its stdio pipes. The split matters: **Talos is the
+client and the CLI is the agent**, so every tool the model wants to use arrives back here as a
+*request* before it happens. That is the same door `ApprovalGate` already stands in, which is why
+stage 2 needed no second approval system.
+
+```powershell
+npm install -g @google/gemini-cli        # 0.71.1 is what this is built against
+gemini                                   # /auth → "Use Gemini API Key" → paste, then quit
+```
+
+The child inherits Talos's environment, so `GEMINI_API_KEY` has to be reachable from the process that
+launches Talos — a Windows *User* variable works, a variable set inside one terminal window only works
+if you start `npm run dev` from that window. `src/main/gemini.ts` never reads or logs the key.
+
+| File | Owns |
+|---|---|
+| [src/main/gemini.ts](src/main/gemini.ts) | the adapter: launch, handshake, one session that survives across messages, the four protocol handlers, the turn timeout and the process teardown. |
+| [src/main/main.ts](src/main/main.ts) | which brain is wired: `GeminiCli` when the CLI is on the machine, `LocalEcho` otherwise, with `/tool` always handled by `LocalEcho`. |
+
+What each protocol call becomes:
+
+| ACP call | Talos side |
+|---|---|
+| `session/update` | `agent_message_chunk` text streams into the bubble; the transcript is what `send()` resolves with. |
+| `session/request_permission` | a real approval card, via `gate.request()` — same 60 s expiry, same allowlist, same audit line as `/tool`. |
+| `fs/read_text_file` | `Tools.read()`, so it is gated too, with a fast answer for a file that does not exist yet. |
+| `fs/write_text_file` | the recorded grant if there is one, otherwise `Tools.write()`. |
+
+Decisions that live in the adapter rather than the gate:
+
+- **Shell is denied before the model can ask.** A generated `talos-policy.toml` in the app-data folder —
+  passed with `--policy`, deliberately not in `~/.gemini`, because that would change the user's own
+  `gemini` runs — gives `run_shell_command` a global `deny`. A global deny rule removes the tool from
+  the model's context entirely, and that was observed: the agent replies that it has no shell tool.
+  `google_web_search` / `web_fetch` are `ask_user`, which is a card here.
+- `think` and `switch_mode` need no card. Neither touches the machine, and spending a 60-second
+  interruption on one would train you to approve without reading.
+- **One card per intent, not two.** A write usually arrives as a permission request *and* an
+  `fs/write_text_file`. The first is answered by you; the second is answered by a one-shot grant keyed
+  by kind + absolute path, 30 s long, cleared when the turn ends. No bytes reach disk without a
+  recorded yes for that exact path, and the execution is written to the audit log with that decision's `id`.
+- **It refuses to start loose.** With no folder granted, the working directory would be your home
+  folder, so the adapter answers with instructions instead of spawning. `/tool` stays on `LocalEcho`
+  precisely because it is the only way to raise a card before anything is allowed.
+
+Proven against the real CLI in a standalone harness (fake Electron `app`/`userData`, same code path):
+the handshake, a read of a sandbox file, six read attempts that got a refusal and did not crash the
+turn, a reply that arrived after ~1 minute of retrying, a second message that remembered the first,
+and no file left behind outside the sandbox.
+
+Not yet verified — this is what stage 2 ends on:
+
+- [ ] Read card in the real panel: ask for a file in the sandbox, see the card, Allow → reply quotes it.
+- [ ] Write card: the diff preview in the card, and one card rather than two.
+- [ ] Deny → the agent reports the refusal in its reply instead of the app going to `confused`.
+- [ ] `Always allow this folder` → the next read in that folder is silent.
+- [ ] Audit log: one decision line + one execution line per write, same `id`.
+- [ ] Tray *Allow tools* off mid-turn → the pending card dies and the turn ends with an error bubble.
+
 ## Known limits
 
-- Replies are a scripted echo. The gate, the tools and the audit log are real and in use, but no
-  model is driving them yet — see *How the approval gate works* above and the spec.
+- The ACP filesystem proxy is **not** a containment boundary. It carries the reads and writes the CLI
+  chooses to route through the client; anything the CLI does inside its own workspace it may also do
+  straight to disk. What contains stage 2 is the child's `cwd`, the generated policy file and the
+  shell deny — the gate covers every action that passes through Talos, which is all of them that need
+  a decision, not necessarily all of them that exist.
+- Shell is denied outright at this stage, so the agent can read and write but cannot run a build or a
+  test. That is the P2 stage 3 question, not an oversight.
+- The pinned model is `gemini-3.5-flash-lite` because the Google free tier is 20 requests/day *per
+  model*; a different id may start the turn and then sit in retry/backoff until it resets.
+- The API key comes from the ambient environment. The spec's `safeStorage` rule is still outstanding
+  for this adapter: the key should be encrypted at rest and handed to the child only.
+- A turn is killed at 240 s. The teardown tree-kills, because the CLI re-execs itself with a larger
+  heap and the pid Talos holds is not always the one still running.
 - The character is procedural geometry, so it reads as a stylised robot rather than an organic creature. A hand-made model is the art swap described above.
 - The window is created `focusable: false` so Talos can never steal focus from your editor; it flips to focusable only while the panel is open and back the instant it closes.
 - Fullscreen games and presentations can end up behind Talos. The `screen-saver` always-on-top level is the cause; auto-demoting on fullscreen detection is a spec risk item, not yet done.
@@ -152,7 +227,8 @@ live run, so that one is code-verified only.
 ## Layout
 
 ```
-src/main/       overlay window, cursor loop, behaviour state machine, chat sheet, agent seam, tray, settings, history
+src/main/       overlay window, cursor loop, behaviour state machine, chat sheet, agent seam,
+                gemini.ts = the ACP adapter, gate/tools/audit, tray, settings, history
 src/preload/    the only surface the renderer can reach (contextIsolation + sandbox on)
 src/renderer/   scene.ts = the character, renderer.ts = the behaviour that poses it, chat.ts = the panel
 src/shared/     types, sizes and IPC channel names

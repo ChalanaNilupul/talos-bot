@@ -14,9 +14,10 @@ import {
   type PetState,
   type ToolRequest,
 } from '../shared/types';
-import { PERSONA, agent } from './agent';
+import { LocalEcho, PERSONA, TOOL_COMMAND, type AgentAdapter } from './agent';
 import { auditDir } from './audit';
 import { ApprovalGate } from './gate';
+import { GeminiCli } from './gemini';
 import { clearHistoryFile, loadHistory, saveHistory } from './history';
 import { persist, settings } from './settings';
 import { Tools } from './tools';
@@ -82,6 +83,20 @@ const gate = new ApprovalGate({
 });
 
 const tools = new Tools(gate);
+
+/* Gemini drives the pet when the CLI is installed. Without it the seam still answers,
+   so /tool read|write|run keeps working and the app is never mute. */
+const brain = GeminiCli.available() ? new GeminiCli(gate, () => app.getPath('userData')) : null;
+if (!brain) console.error('[talos] Gemini CLI not found — only /tool commands will answer');
+
+const echo = new LocalEcho();
+/* `/tool` stays with LocalEcho even with a real agent wired in, because it is the only
+   way to raise an approval card before any folder has been granted. */
+const agent: AgentAdapter = {
+  id: brain?.id ?? echo.id,
+  send: (request, ctx) =>
+    TOOL_COMMAND.test(request.prompt.trim()) ? echo.send(request, ctx) : (brain ?? echo).send(request, ctx)
+};
 
 /* In dev, Electron's app path is dist/ — which has no package.json — so the
    process would otherwise call itself "Electron" and keep its settings, history
@@ -596,6 +611,7 @@ app.on('before-quit', () => {
   /* Nothing may stay pending across a restart: a card that was never answered is a
      denial, not a yes deferred to the next launch. */
   gate.cancelAll('no-window', 'no-window');
+  brain?.stop();
   if (win) {
     const [x, y] = petPosition();
     settings().lastPosition = { x, y };

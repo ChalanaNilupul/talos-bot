@@ -1,6 +1,6 @@
 # VIXO Desktop Pet — Product Spec (v0 draft)
 
-**Status:** draft, awaiting approval
+**Status:** P0, P1 and P2 stage 1 shipped; P2 stage 2 (Gemini CLI over ACP) wired and awaiting its live checklist
 **Owner:** solo
 **Target OS:** Windows 11 (x64) first; macOS/Linux later via Electron ports
 
@@ -31,7 +31,7 @@ Pronunciation-first, per VIXO naming convention. Candidates:
 | Concern | Decision | Revisit when |
 |---|---|---|
 | Shell/runtime | **Electron + TypeScript** | Bundle size becomes a real problem → port renderer to Tauri 2 |
-| Agent brain | **Adapt an existing headless coding CLI as a subprocess** | You need custom tool semantics no CLI exposes |
+| Agent brain | **Adapt an existing headless coding CLI as a subprocess** — landed as Gemini CLI over ACP, spawned with `--acp` and driven as the *agent* side of the protocol | You need custom tool semantics no CLI exposes |
 | Animation | **Procedural 3D with three.js** — geometry built in code, no model file. (Revised: the plan was Rive, then a 3D character was wanted.) | You want a hand-art character → drop a rigged `.glb` or VRoid `.vrm` in and rewrite `scene.ts` |
 | Brand | **New product under VIXO** | — |
 | Packaging | `electron-builder`, NSIS installer | — |
@@ -46,6 +46,7 @@ Pronunciation-first, per VIXO naming convention. Candidates:
 │  OverlayManager      window geometry, alwaysOnTop, click-through, edge docking     │
 │  StateBus            single source of truth for pet mood/activity; broadcasts IPC  │
 │  AgentAdapter        spawn headless CLI, parse stream, normalise into events       │
+│                      (P2 stage 2: gemini --acp, JSON-RPC over stdio, both ways)    │
 │  ApprovalGate        every privileged action blocks here until user decides        │
 │  AuditLog            append-only JSONL, one line per tool call + decision          │
 │  Watchers            git status, active-file, test results, clipboard (opt-in)     │
@@ -148,17 +149,38 @@ type AgentEvent =
   | { kind: 'error'; message: string }
 ```
 
-**First adapter: Codex CLI or Claude Code**, both of which have documented non-interactive modes with streamed JSON lines — spawn, read stdout line by line, map into `AgentEvent`.
+**Planned at first: Codex CLI or Claude Code**, both of which have documented non-interactive modes
+with streamed JSON lines — spawn, read stdout line by line, map into `AgentEvent`. **Aider** second,
+because it is git-native and works with local models.
 
-**Second adapter: Aider** — useful because it is git-native and works with local models.
+**What shipped instead, in P2 stage 2.** [src/main/gemini.ts](../src/main/gemini.ts) spawns
+`node.exe %APPDATA%\npm\node_modules\@google\gemini-cli\bundle\gemini.js --acp -m <model>
+--approval-mode default --policy <talos-policy.toml>` and talks ACP to it through
+`@agentclientprotocol/sdk`. The direction of the tool traffic turned out to be the opposite of the
+draft, which changed the design:
+
+- ACP is not an output stream to parse. Each tool call is a **request from the agent to the client**
+  (`session/request_permission`, `fs/read_text_file`, `fs/write_text_file`) that Talos must *answer*
+  before the model proceeds. So the adapter does not normalise tool calls into `AgentEvent`s for the UI —
+  it hands them to `ApprovalGate` and returns the decision. Enforcement lives where it was always going
+  to live, and the renderer only ever sees text.
+- Because of that, `send(request, ctx) => Promise<string>` from P1 stayed the seam unchanged. `ctx`
+  carries `say(delta)` plus the same `tools` object `/tool` uses, so the model and the typed commands go
+  through one path. The `AgentEvent` union above is what a *stream-parsing* adapter would need; if a
+  second CLI is only usable that way, that is when the seam widens.
+- Spawning `gemini.cmd` throws `EINVAL` on this Node, and `shell: true` would put the policy path
+  through cmd.exe quoting, so the bundle is run with `node.exe` found on `PATH`. Handlers get a context
+  object, so params are `ctx.params`; `Readable.toWeb()`/`Writable.toWeb()` need one assertion because
+  Node's web-stream globals and the SDK's whatwg declarations are structurally incompatible.
+- The connection outlives a turn, so the agent keeps its own context between messages. Anything that
+  goes wrong drops it and the next message rebuilds it; a turn is raced against a 240 s timeout and the
+  teardown tree-kills, because the CLI re-execs itself with a bigger heap.
 
 **Shipped in P1, and narrower than the draft above.** [src/main/agent.ts](../src/main/agent.ts) defines
 `send(request, onDelta) => Promise<string>` — one prompt in, a delta callback, the final text out. That is
-deliberately the smallest seam the UI can be built against, because there is nothing yet to stream tool
-calls for. P2 widens it to the full `AgentEvent` set above (or replaces it with an `AsyncIterable`); the
-`LocalEcho` implementation behind it is the only thing that goes away.
-
-**To verify before committing:** whether Qoder's CLI exposes a headless code-execution mode with streamed JSON (as opposed to only the collaboration-platform commands). If it does, it becomes the default adapter.
+deliberately the smallest seam the UI can be built against. `LocalEcho` is no longer the only thing behind
+it: it is the fallback when the CLI is missing, and it keeps handling `/tool`, which is the only way to
+raise an approval card before any folder has been granted.
 
 **Personality lives above the adapter.** The adapter gets a task; a separate lightweight LLM call owns the pet's voice, so it can comment, joke, and react without a coding agent in the loop.
 
@@ -181,9 +203,11 @@ Non-negotiable, because this app has file and shell access and runs at login.
 2. **Approval gate blocks execution.** No shell command and no write outside the allowlist runs before a decision. Default is deny. Approvals expire after 60s.
 3. **Approval UI is the pet.** `alarmed` state + an inline card: exact command, cwd, and diff preview for writes. Approve / deny / always-allow-this-folder.
 4. **Audit log.** `%APPDATA%/vixo-pet/audit/YYYY-MM-DD.jsonl` — timestamp, event, args, decision, decision source. Append-only.
-5. **Secrets.** `safeStorage.encryptString`; check `isEncryptionAvailable()` and fail loudly rather than falling back to plaintext.
+5. **Secrets.** `safeStorage.encryptString`; check `isEncryptionAvailable()` and fail loudly rather than falling back to plaintext. *(Outstanding: the Gemini key is inherited from the ambient environment instead. The adapter never reads or logs it, but it should be encrypted at rest and passed to the child only.)*
 6. **Renderer isolation.** `contextIsolation: true`, no `nodeIntegration`, CSP in the HTML, `shell.openExternal` behind an https-only allowlist.
 7. **"Help mode" kill switch** in the tray: disables all tools instantly, leaves the pet and chat running.
+8. **Policy before prompt.** Stage 2 denies `run_shell_command` in the CLI's own policy engine rather than answering "no" to a card, because a global deny removes the tool from the model's context — it cannot be talked into asking for something it was never given. The `--policy` file is generated into the app-data folder, never `~/.gemini`, so Talos does not change the user's own CLI runs.
+9. **The gate covers what Talos can see.** Reads and writes that arrive as ACP requests are gated; a child process with a filesystem handle can also touch disk on its own, inside its `cwd` and within whatever the CLI's own workspace rules allow. Containment is therefore cwd + policy + gate, and the gate is the *decision* layer, not the sandbox.
 
 ---
 
@@ -210,6 +234,23 @@ What actually landed, and where it differs from the draft:
 ### P2 — It has hands
 `AgentAdapter` + first CLI adapter, allowlist UI, `ApprovalGate` with the inline approval card, audit log, git badge.
 **Done when:** it fixes a real failing test in a real repo, and you can name every file it touched.
+
+Delivered in three stages, because "it has hands" is the part that can hurt you:
+
+**Stage 1 — shipped and verified by hand.** `gate.ts` / `tools.ts` / `audit.ts` / `approval.ts`, plus the
+tray kill switch and the folder allowlist. Verified: allow, deny, `Enter` lands on Deny, always-allow
+this folder → silent next write, `run` in an allowlisted folder still cards, 60 s expiry, kill switch
+beats the allowlist. The unread click paths (tray checkbox, folder revoke, `cancelAll` on quit) are
+unexercised but funnel into the same `settle()`.
+
+**Stage 2 — Gemini CLI over ACP, wired, awaiting the live run.** The adapter exists, typechecks, builds,
+and drove a real turn in a standalone harness; the cards have not been seen in the panel yet. The
+checklist is the *Not yet verified* list in the README. Deliberately narrow: shell denied by policy, one
+card per intent via a 30 s single-use grant, refuses to start when nothing is allowlisted.
+
+**Stage 3 — the outstanding P2 items.** Shell behind its own approval tier, the key in `safeStorage`, a
+model whose quota is not 20 requests/day, the git badge, and the *fix a real failing test* acceptance
+test the stage-2 model cannot pass without a shell.
 
 ### P3 — It remembers
 Markdown memory store + retrieval, session history restored on restart, proactive nudges, watch-folder awareness.
@@ -253,7 +294,9 @@ npm install
 npm run dev
 ```
 
-Plus, depending on the adapter chosen: Codex CLI / Claude Code / Aider, and an API key for it.
+Plus the adapter actually wired in: `npm install -g @google/gemini-cli` and a Gemini API key. Talos runs
+without either — `LocalEcho` answers, `/tool` works, the gate is still exercised — so the app is never
+mute because a CLI is missing.
 
 No art tooling is needed for the procedural character. If you later want a modelled one: VRoid Studio (free, exports `.vrm`) or Blender for `.glb`.
 
@@ -267,5 +310,7 @@ No art tooling is needed for the procedural character. If you later want a model
 | `alwaysOnTop: 'screen-saver'` covers fullscreen games/presentations | auto-demote to `pop-up-menu` when a fullscreen window is detected |
 | Transparent Electron window eats 200–300MB idle | the render loop drops to ~12Hz while sleeping; measured at 4 Electron processes |
 | Headless CLI output format changes and breaks the parser | adapter owns all parsing, golden-file fixtures per CLI version |
+| ACP version churn in Gemini CLI (v1 protocol, 0.71.1 here) — `session/new`, permission shapes or the fs proxy shift | the adapter is the only file that knows the protocol; `gate.ts` and the UI are unchanged by it, and `GeminiCli.available()` degrades to `LocalEcho` rather than a silent pet |
+| Free-tier quota (20 requests/day per model) makes the pet look broken | the pinned model is chosen for quota, and a rate-limited turn surfaces as an error bubble rather than a hang: the turn is raced against a timeout, not awaited |
 | It becomes annoying → you stop using it | every ambient behaviour has an off switch; `sleep` by default after 5 min |
 | WebGL renders blank inside a transparent layered window on some GPU/driver combos | verified working with GPU acceleration here; `app.disableHardwareAcceleration()` is the fallback, and `scripts/shot.ps1` catches it in CI-less development |
