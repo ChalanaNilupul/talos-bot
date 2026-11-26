@@ -8,13 +8,19 @@ export interface Settings {
   autoStart: boolean;
   forceClickThrough: boolean;
   lastPosition: { x: number; y: number } | null;
+  /** Directories a write may land in without asking. Nothing is here until you grant it. */
+  allowedDirs: string[];
+  /** Tray kill switch. Off means every tool request is denied without showing a card. */
+  toolsEnabled: boolean;
 }
 
 const DEFAULTS: Settings = {
   dock: 'bottom-right',
   autoStart: false,
   forceClickThrough: false,
-  lastPosition: null
+  lastPosition: null,
+  allowedDirs: [],
+  toolsEnabled: true
 };
 
 let cached: Settings | null = null;

@@ -4,6 +4,7 @@ import {
   type ChatEvent,
   type ChatMessage,
 } from '../shared/types';
+import { denyCard, hasCard } from './approval';
 
 const sheet = document.getElementById('sheet') as HTMLElement;
 const log = document.getElementById('log') as HTMLDivElement;
@@ -137,7 +138,10 @@ input.addEventListener('keydown', (event) => {
 document.addEventListener('keydown', (event) => {
   if (event.key !== 'Escape' || !open) return;
   event.preventDefault();
-  window.talos.closeSheet();
+  /* An unanswered card takes the key first. Esc means "no" to it rather than
+     "hide the panel", which would leave the agent blocked on a card nobody sees. */
+  if (hasCard()) denyCard();
+  else window.talos.closeSheet();
 });
 
 window.talos.onSheet(setOpen);

@@ -18,14 +18,31 @@ function restart() {
   });
 }
 
+/* Three watched contexts means three onEnd callbacks for one edit. Without coalescing
+   they copy and relaunch over each other, so the copies race and Electron is killed and
+   respawned three times per keystroke. */
+let timer = null;
+let chain = Promise.resolve();
+
+function refresh() {
+  clearTimeout(timer);
+  timer = setTimeout(() => {
+    chain = chain
+      .then(copyStatic)
+      .then(() => {
+        started = true;
+        restart();
+      })
+      .catch((err) => console.error('dev copy failed:', err.message));
+  }, 80);
+}
+
 const restartOnRebuild = {
   name: 'restart-electron',
   setup(build) {
     build.onEnd((result) => {
       if (result.errors.length) return console.error('build failed, not relaunching');
-      copyStatic();
-      started = true;
-      restart();
+      refresh();
     });
   }
 };

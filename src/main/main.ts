@@ -6,15 +6,20 @@ import {
   PET_WIDTH,
   SHEET_HEIGHT,
   SHEET_WIDTH,
+  type ApprovalOutcome,
   type ChatEvent,
   type ChatMessage,
   type CursorInfo,
   type DockSide,
   type PetState,
+  type ToolRequest,
 } from '../shared/types';
 import { PERSONA, agent } from './agent';
+import { auditDir } from './audit';
+import { ApprovalGate } from './gate';
 import { clearHistoryFile, loadHistory, saveHistory } from './history';
 import { persist, settings } from './settings';
+import { Tools } from './tools';
 
 const CURSOR_POLL_MS = 33; // ~30Hz
 const TRACK_RADIUS = 420; // further than this the pet stops following the cursor
@@ -50,6 +55,33 @@ let overSheet = false;
 let replyInFlight = false;
 /** Loaded from disk in whenReady — see src/main/history.ts. */
 let history: ChatMessage[] = [];
+
+/**
+ * Where a relative path or command is resolved. The first folder the user granted
+ * wins, so "write notes.txt" means the folder they already said yes to; with no
+ * grants yet it is home, which is at least a place they can find again.
+ */
+function workdir(): string {
+  return settings().allowedDirs[0] ?? app.getPath('home');
+}
+
+const gate = new ApprovalGate({
+  show: (request: ToolRequest) => {
+    if (!win) return false;
+    /* The card is the one thing allowed to pull the user in. An approval nobody was
+       shown would simply time out into a denial and look like the app ignoring them. */
+    openSheet();
+    win.webContents.send(CH.approvalRequest, request);
+    setState('alarmed');
+    return true;
+  },
+  hide: (id: string, outcome: ApprovalOutcome) => {
+    win?.webContents.send(CH.approvalEnd, id, outcome);
+    if (gate.waiting === 0 && state === 'alarmed') wake();
+  },
+});
+
+const tools = new Tools(gate);
 
 /* In dev, Electron's app path is dist/ — which has no package.json — so the
    process would otherwise call itself "Electron" and keep its settings, history
@@ -240,6 +272,7 @@ function openSheet(): void {
   win.focus();
   win.webContents.send(CH.sheetState, true);
   win.webContents.send(CH.chatHistory, history);
+  win.webContents.send(CH.toolsState, settings().toolsEnabled);
   wake();
   applyMouse();
 }
@@ -274,10 +307,16 @@ async function handleSend(raw: string): Promise<void> {
   setState('thinking');
 
   try {
-    const reply = await agent.send({ prompt, history: prior, persona: PERSONA }, (delta) => {
-      if (state !== 'talking') setState('talking');
-      emitChat({ kind: 'delta', text: delta });
-    });
+    const reply = await agent.send(
+      { prompt, history: prior, persona: PERSONA, cwd: workdir() },
+      {
+        tools,
+        say: (delta) => {
+          if (state !== 'talking') setState('talking');
+          emitChat({ kind: 'delta', text: delta });
+        },
+      }
+    );
     pushHistory({ role: 'talos', text: reply });
     emitChat({ kind: 'reply', text: reply });
     setState('happy');
@@ -352,9 +391,38 @@ function rebuildTray(): void {
     Menu.buildFromTemplate([
       { label: 'Talos is resting on your desktop', enabled: false },
       { label: `Show chat  (${SUMMON_SHORTCUT})`, click: toggleSheet },
-      { label: 'Replies are a local echo — the real agent arrives in P2', enabled: false },
       { label: 'Clear conversation', click: clearConversation },
       { type: 'separator' },
+      {
+        /* The kill switch has to be one click from the tray and work instantly,
+           because that is the control you reach for the moment you stop trusting
+           what it just did. */
+        label: 'Allow tools',
+        type: 'checkbox',
+        checked: settings().toolsEnabled,
+        click: (item) => {
+          settings().toolsEnabled = item.checked;
+          persist();
+          if (!item.checked) gate.cancelAll('tools-off', 'kill-switch');
+          win?.webContents.send(CH.toolsState, item.checked);
+          rebuildTray();
+        }
+      },
+      {
+        /* rebuildTray runs after every grant, so reading the list here is never stale.
+           Clicking one revokes it — the way in has to have a way out. */
+        label: 'Allowed folders',
+        submenu: settings().allowedDirs.length === 0
+          ? [{ label: 'none yet', enabled: false }]
+          : settings().allowedDirs.map((dir) => ({
+              label: dir,
+              click: () => {
+                settings().allowedDirs = settings().allowedDirs.filter((d) => d !== dir);
+                persist();
+                rebuildTray();
+              }
+            }))
+      },
       {
         label: 'Pass clicks through pet',
         type: 'checkbox',
@@ -395,6 +463,7 @@ function rebuildTray(): void {
         }))
       },
       { label: 'Open settings folder', click: () => void shell.openPath(app.getPath('userData')) },
+      { label: 'Open audit log', click: () => void shell.openPath(auditDir()) },
       { type: 'separator' },
       { label: 'Quit Talos', click: () => app.quit() }
     ])
@@ -505,6 +574,14 @@ void app.whenReady().then(() => {
   ipcMain.on(CH.chatSend, (_event, text: unknown) => {
     if (typeof text === 'string') void handleSend(text);
   });
+  /* The renderer names an id and a decision and nothing else: it cannot say what the
+     tool would have done, because main already decided that before asking. */
+  ipcMain.on(CH.approvalDecision, (_event, payload: unknown) => {
+    if (typeof payload !== 'object' || payload === null) return;
+    const { id, decision } = payload as { id?: unknown; decision?: unknown };
+    if (typeof id !== 'string') return;
+    if (decision === 'allow' || decision === 'deny' || decision === 'allow-folder') gate.decide(id, decision);
+  });
 
   if (!globalShortcut.isRegistered(SUMMON_SHORTCUT)) globalShortcut.register(SUMMON_SHORTCUT, toggleSheet);
 
@@ -516,6 +593,9 @@ app.on('before-quit', () => {
   if (poll) clearInterval(poll);
   if (glide) clearInterval(glide);
   globalShortcut.unregisterAll();
+  /* Nothing may stay pending across a restart: a card that was never answered is a
+     denial, not a yes deferred to the next launch. */
+  gate.cancelAll('no-window', 'no-window');
   if (win) {
     const [x, y] = petPosition();
     settings().lastPosition = { x, y };

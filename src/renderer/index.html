@@ -13,6 +13,18 @@
     <canvas id="stage" aria-label="Talos"></canvas>
     <section id="sheet" hidden>
       <div id="log" aria-live="polite"></div>
+      <aside id="approval" hidden aria-live="assertive">
+        <p id="approval-head"></p>
+        <pre id="approval-target"></pre>
+        <pre id="approval-preview" hidden></pre>
+        <p id="approval-cwd"></p>
+        <div id="approval-actions">
+          <button id="approval-deny" type="button">Deny</button>
+          <button id="approval-allow" type="button">Allow</button>
+          <button id="approval-folder" type="button">Always allow this folder</button>
+        </div>
+        <p id="approval-clock"></p>
+      </aside>
       <form id="composer">
         <textarea
           id="input"

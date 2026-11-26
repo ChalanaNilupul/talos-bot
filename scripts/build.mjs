@@ -1,5 +1,5 @@
 import { context, build } from 'esbuild';
-import { cp, mkdir, rm } from 'node:fs/promises';
+import { mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -21,8 +21,11 @@ export const targets = [
 ];
 
 export async function copyStatic() {
-  await mkdir(dist, { recursive: true });
-  await cp(path.join(root, 'src', 'renderer', 'index.html'), path.join(dist, 'renderer', 'index.html'), { recursive: true });
+  const target = path.join(dist, 'renderer', 'index.html');
+  await mkdir(path.dirname(target), { recursive: true });
+  /* readFile/writeFile, not cp: fs.cp with recursive:true unlinks the destination
+     before writing it, and on a file that has never been copied that throws ENOENT. */
+  await writeFile(target, await readFile(path.join(root, 'src', 'renderer', 'index.html')));
 }
 
 export function createWatchContexts(plugins = []) {

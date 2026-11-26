@@ -54,7 +54,7 @@ Pronunciation-first, per VIXO naming convention. Candidates:
 └──────────────────────────────────────┬─────────────────────────────────────────────┘
                                        │ ipcMain / ipcRenderer (contextIsolation on)
 ┌──────────────────────────────────────▼─────────────────────────────────────────────┐
-│  Renderer (transparent 200x220 frameless window, 380x520 while the panel is open)   │
+│  Renderer (transparent 176x194 frameless window, 380x494 while the panel is open)   │
 │    Scene3D           three.js WebGLRenderer in one <canvas>, fed by a Pose object   │
 │    ChatSheet         rounded expanding panel that grows out of the pet              │
 │    ApprovalCard      inline approve/deny UI rendered on the pet itself  (P2)        │
@@ -69,7 +69,7 @@ Pronunciation-first, per VIXO naming convention. Candidates:
 
 ```ts
 new BrowserWindow({
-  width: 200, height: 220,        // PET_WIDTH / PET_HEIGHT in src/shared/types.ts
+  width: 176, height: 194,        // PET_WIDTH / PET_HEIGHT in src/shared/types.ts
   frame: false,
   transparent: true,
   backgroundColor: '#00000000',

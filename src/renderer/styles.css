@@ -125,3 +125,110 @@ body {
   opacity: 0.45;
   cursor: default;
 }
+
+/* --------------------------------------------------------- approval card -- */
+
+/* Deliberately the loudest thing in the panel: it is about to touch the machine. */
+#approval {
+  flex: none;
+  margin: 0 10px 8px;
+  padding: 9px 10px;
+  border-radius: 12px;
+  border: 1px solid rgba(158, 196, 255, 0.55);
+  background: rgba(30, 42, 61, 0.92);
+}
+
+#approval[hidden] {
+  display: none;
+}
+
+#approval p {
+  margin: 0;
+}
+
+#approval-head {
+  font-weight: 600;
+}
+
+/* Monospace and selectable: you have to be able to read the exact command and
+   copy it out if you want to check it. */
+#approval-target,
+#approval-preview {
+  margin: 6px 0 0;
+  padding: 6px 8px;
+  border-radius: 8px;
+  background: rgba(0, 0, 0, 0.34);
+  font: 12px/1.45 ui-monospace, "Cascadia Mono", Consolas, monospace;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  user-select: text;
+  -webkit-user-select: text;
+}
+
+#approval-preview {
+  max-height: 92px;
+  overflow-y: auto;
+}
+
+#approval-preview[hidden] {
+  display: none;
+}
+
+#approval-cwd {
+  margin-top: 5px;
+  font-size: 11px;
+  color: rgba(238, 241, 245, 0.6);
+  overflow-wrap: anywhere;
+}
+
+#approval-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+/* Deny is first in the DOM so it is the default button and the first Tab stop:
+   the safe answer is the one you reach by doing nothing. The visuals stay
+   Allow / Always / Deny. */
+#approval-deny {
+  order: 3;
+}
+
+#approval-allow {
+  order: 1;
+}
+
+#approval-folder {
+  order: 2;
+}
+
+#approval-actions button {
+  padding: 4px 10px;
+  border-radius: 8px;
+  font: inherit;
+  cursor: pointer;
+}
+
+#approval-allow {
+  border: 0;
+  background: #eef1f5;
+  color: #1b1e22;
+}
+
+#approval-deny,
+#approval-folder {
+  border: 1px solid rgba(255, 255, 255, 0.28);
+  background: transparent;
+  color: #eef1f5;
+}
+
+#approval-folder[hidden] {
+  display: none;
+}
+
+#approval-clock {
+  margin-top: 6px;
+  font-size: 11px;
+  color: rgba(238, 241, 245, 0.55);
+}

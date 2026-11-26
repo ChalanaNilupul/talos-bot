@@ -1,11 +1,14 @@
 import { contextBridge, ipcRenderer } from 'electron';
 import {
   CH,
+  type ApprovalDecision,
+  type ApprovalOutcome,
   type ChatEvent,
   type ChatMessage,
   type CursorInfo,
   type PetState,
   type TalosApi,
+  type ToolRequest,
 } from '../shared/types';
 
 /* Every method is bound to one fixed channel name: the renderer can never pick
@@ -33,7 +36,17 @@ const api: TalosApi = {
   },
   openSheet: () => ipcRenderer.send(CH.sheetOpen),
   closeSheet: () => ipcRenderer.send(CH.sheetClose),
-  send: (text) => ipcRenderer.send(CH.chatSend, text)
+  send: (text) => ipcRenderer.send(CH.chatSend, text),
+  onApproval: (cb) => {
+    ipcRenderer.on(CH.approvalRequest, (_event, request: ToolRequest) => cb(request));
+  },
+  onApprovalEnd: (cb) => {
+    ipcRenderer.on(CH.approvalEnd, (_event, id: string, outcome: ApprovalOutcome) => cb(id, outcome));
+  },
+  decideApproval: (id, decision: ApprovalDecision) => ipcRenderer.send(CH.approvalDecision, { id, decision }),
+  onTools: (cb) => {
+    ipcRenderer.on(CH.toolsState, (_event, enabled: boolean) => cb(enabled));
+  }
 };
 
 contextBridge.exposeInMainWorld('talos', api);
