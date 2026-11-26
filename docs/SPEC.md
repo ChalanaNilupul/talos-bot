@@ -203,6 +203,8 @@ What actually landed, and where it differs from the draft:
 - Replies come from `LocalEcho` behind the `AgentAdapter` seam, so nothing in P1 can read a file or run a command. `PERSONA` in [src/main/agent.ts](../src/main/agent.ts) is the prompt that P2 will hand to a real model.
 - Hotkey is `Alt+Shift+Space`, not `alt+space` (Windows owns that one).
 - History lives in the main process, capped at 40 messages, and is written to `chat-history.json` in the app-data folder after every turn — a restart keeps the thread and the adapter is given it as context. The tray's Clear conversation drops it. Recall across *old* conversations, summarising it, and searching it are still P3's memory store.
+- One data folder for both builds. `app.setName('Talos')` runs before anything asks for a path, because in dev Electron's app path is `dist/` — which has no `package.json` — and the process would otherwise call itself "Electron" and keep its settings and transcript in `%APPDATA%\Electron`, apart from the installed app. Sharing the folder shares the single-instance lock too, so a second launch now prints why it exited.
+- Version is `0.1.0`, matching the milestone; the installer is `out/Talos-Setup-0.1.0.exe`.
 - Not yet verified by hand: dismissal on losing focus, the IME guard on `Enter`, the tray's Clear conversation (the menu is only reachable by a real click on the tray icon), and the error bubble (no adapter failure path exists to trigger it).
 
 ### P2 — It has hands

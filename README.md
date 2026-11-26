@@ -16,6 +16,10 @@ npm run dev        # builds src/ and launches Talos, relaunching on every file c
 
 `npm run dev` keeps running. Press `Ctrl+C` in that terminal to stop it.
 
+Settings and the transcript live in `%APPDATA%\Talos` — the same folder the installed app uses, so
+`npm start` picks up exactly where the installed bot left off. That also means only one Talos can
+run at a time: starting a second one prints a line saying so and exits, rather than failing silently.
+
 Other commands:
 
 ```powershell

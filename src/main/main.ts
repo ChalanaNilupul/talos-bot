@@ -51,10 +51,20 @@ let replyInFlight = false;
 /** Loaded from disk in whenReady — see src/main/history.ts. */
 let history: ChatMessage[] = [];
 
+/* In dev, Electron's app path is dist/ — which has no package.json — so the
+   process would otherwise call itself "Electron" and keep its settings, history
+   and single-instance lock in %APPDATA%\Electron, a folder apart from the
+   installed app's. Named here, before anything asks for a path. */
+app.setName('Talos');
 app.setAppUserModelId('com.vixo.talos');
 Menu.setApplicationMenu(null);
 
-if (!app.requestSingleInstanceLock()) app.quit();
+if (!app.requestSingleInstanceLock()) {
+  /* Silent exits are undebuggable, and dev and the installed app now share one
+     lock because they share one data folder. */
+  console.error('[talos] another Talos is already running — quit it from the tray icon before starting this one');
+  app.quit();
+}
 
 /* ---------------------------------------------------------------- geometry */
 
